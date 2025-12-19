@@ -16,20 +16,26 @@ import numpy as np
 import tempfile
 import matplotlib.pyplot as plt
 import os
+import sys
 
 # Initialize session state
 if 'results' not in st.session_state:
     st.session_state.results = None
 if 'fps' not in st.session_state:
     st.session_state.fps = None
+if 'error_log' not in st.session_state:
+    st.session_state.error_log = []
 
 # Import VitalLens after Streamlit config
 try:
     import vitallens
     VITALLENS_AVAILABLE = True
+    st.session_state.error_log.append("✅ VitalLens imported successfully")
 except ImportError as e:
     VITALLENS_AVAILABLE = False
-    st.error(f"VitalLens import error: {e}")
+    error_msg = f"VitalLens import error: {e}"
+    st.session_state.error_log.append(f"❌ {error_msg}")
+    st.error(error_msg)
     import traceback
     st.code(traceback.format_exc())
 
@@ -150,6 +156,18 @@ with col1:
     </div>
     ''', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Debug info expander
+    with st.expander("🔍 Debug Information"):
+        st.write("**System Info:**")
+        st.code(f"Python: {sys.version}")
+        st.code(f"OpenCV: {cv2.__version__}")
+        if VITALLENS_AVAILABLE:
+            st.code(f"VitalLens: {vitallens.__version__}")
+        
+        st.write("**Error Log:**")
+        for log in st.session_state.error_log:
+            st.text(log)
 
 # MIDDLE COLUMN - Video Upload & Analysis
 with col2:
@@ -171,57 +189,85 @@ with col2:
     )
     
     # Display video if uploaded
+    video_path = None
     if video_file:
-        st.video(video_file)
-        
-        # Save to temp file with proper cleanup
         try:
+            st.video(video_file)
+            
+            # Save to temp file with proper cleanup
             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
                 tmp_file.write(video_file.read())
                 video_path = tmp_file.name
+            
+            st.session_state.error_log.append(f"✅ Video saved to: {video_path}")
+            
         except Exception as e:
-            st.error(f"Error saving video: {str(e)}")
+            error_msg = f"Error saving video: {str(e)}"
+            st.error(error_msg)
+            st.session_state.error_log.append(f"❌ {error_msg}")
+            import traceback
+            st.code(traceback.format_exc())
             video_path = None
     else:
-        video_path = None
         st.info("📹 Please upload a video file to begin")
     
     # Analysis button
     if video_path and api_key and VITALLENS_AVAILABLE:
         if st.button("START ANALYSIS", type="primary", use_container_width=True):
             try:
+                st.session_state.error_log.append("🔄 Starting analysis...")
+                
                 # Load video
                 with st.spinner("Loading video..."):
+                    st.session_state.error_log.append(f"📂 Opening video: {video_path}")
                     cap = cv2.VideoCapture(video_path)
+                    
                     if not cap.isOpened():
-                        st.error("Cannot open video file")
-                        st.stop()
+                        raise Exception(f"Cannot open video file: {video_path}")
                     
                     fps = cap.get(cv2.CAP_PROP_FPS)
+                    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    
+                    st.session_state.error_log.append(f"📊 Video FPS: {fps}, Total frames: {frame_count}")
+                    
                     if not fps or fps <= 0:
                         fps = 30.0
                         st.warning(f"Could not detect FPS, using default: {fps}")
+                        st.session_state.error_log.append(f"⚠️ Using default FPS: {fps}")
                     
                     frames = []
                     max_frames = 1800  # Max 60 seconds at 30fps
+                    
+                    progress_bar = st.progress(0)
+                    frame_num = 0
                     
                     while len(frames) < max_frames:
                         ret, frame = cap.read()
                         if not ret:
                             break
-                        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                        
+                        # Convert BGR to RGB
+                        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        frames.append(rgb_frame)
+                        
+                        frame_num += 1
+                        if frame_num % 30 == 0:  # Update every 30 frames
+                            progress_bar.progress(min(frame_num / min(max_frames, frame_count), 1.0))
                     
                     cap.release()
+                    progress_bar.empty()
                 
                 if not frames:
-                    st.error("No frames could be read from video")
-                    st.stop()
+                    raise Exception("No frames could be read from video")
                 
                 video_array = np.array(frames)
+                st.session_state.error_log.append(f"✅ Loaded {len(frames)} frames, shape: {video_array.shape}")
                 st.success(f"✅ Loaded {len(frames)} frames ({len(frames)/fps:.1f}s)")
                 
                 # Initialize VitalLens
                 with st.spinner("Initializing VitalLens..."):
+                    st.session_state.error_log.append("🔧 Initializing VitalLens...")
+                    
                     vl = vitallens.VitalLens(
                         method=vitallens.Method.VITALLENS,
                         api_key=api_key,
@@ -229,37 +275,54 @@ with col2:
                         export_to_json=False,
                         estimate_rolling_vitals=True
                     )
+                    
+                    st.session_state.error_log.append("✅ VitalLens initialized")
                 
                 # Analyze
                 with st.spinner("Analyzing vital signs..."):
+                    st.session_state.error_log.append(f"🔬 Running analysis with fps={fps}...")
+                    
                     results = vl(video_array, fps=fps)
+                    
+                    st.session_state.error_log.append(f"📊 Analysis complete. Results: {type(results)}")
                 
                 if not results:
                     st.error("⚠️ No face detected. Ensure face is visible and well-lit.")
+                    st.session_state.error_log.append("❌ No results returned (no face detected)")
                 else:
+                    st.session_state.error_log.append(f"✅ Got {len(results)} result(s)")
+                    st.session_state.error_log.append(f"📋 Result keys: {list(results[0].keys())}")
+                    
                     st.session_state.results = results[0]['vital_signs']
                     st.session_state.fps = fps
                     st.success("✅ Analysis complete!")
                     st.rerun()
                     
             except Exception as e:
-                st.error(f"Error during analysis: {str(e)}")
+                error_msg = f"Error during analysis: {str(e)}"
+                st.error(error_msg)
+                st.session_state.error_log.append(f"❌ {error_msg}")
+                
                 import traceback
-                st.code(traceback.format_exc())
+                tb = traceback.format_exc()
+                st.code(tb)
+                st.session_state.error_log.append(f"Full traceback:\n{tb}")
+                
             finally:
                 # Clean up temp file
                 try:
                     if video_path and os.path.exists(video_path):
                         os.unlink(video_path)
-                except:
-                    pass
+                        st.session_state.error_log.append(f"🗑️ Cleaned up temp file")
+                except Exception as e:
+                    st.session_state.error_log.append(f"⚠️ Could not delete temp file: {e}")
     
     elif not VITALLENS_AVAILABLE:
-        st.error("VitalLens library not available. Check the error message above.")
+        st.error("❌ VitalLens library not available. Check the error message above.")
     elif not api_key:
-        st.warning("Please enter your API key")
+        st.warning("⚠️ Please enter your API key")
     elif not video_path:
-        st.info("Please upload a video file")
+        st.info("📹 Please upload a video file")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -312,40 +375,46 @@ if st.session_state.results:
         
         with c1:
             if has_hr:
-                rolling_hr = vital_signs['rolling_heart_rate']['data']
-                time_axis = np.arange(len(rolling_hr)) / fps
-                hr_avg = vital_signs.get('heart_rate', {}).get('value')
-                
-                fig, ax = plt.subplots(figsize=(7, 4), facecolor='white')
-                ax.plot(time_axis, rolling_hr, color='#ef4444', linewidth=2.5, label='Heart Rate')
-                if hr_avg:
-                    ax.axhline(y=hr_avg, color='#dc2626', linestyle='--', linewidth=1.5, alpha=0.7, label=f'Avg: {hr_avg:.0f} bpm')
-                ax.set_xlabel("Time (seconds)", fontsize=10)
-                ax.set_ylabel("Heart Rate (bpm)", fontsize=10)
-                ax.grid(True, alpha=0.2)
-                ax.spines['top'].set_visible(False)
-                ax.spines['right'].set_visible(False)
-                ax.legend(loc='upper right', fontsize=8)
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
+                try:
+                    rolling_hr = vital_signs['rolling_heart_rate']['data']
+                    time_axis = np.arange(len(rolling_hr)) / fps
+                    hr_avg = vital_signs.get('heart_rate', {}).get('value')
+                    
+                    fig, ax = plt.subplots(figsize=(7, 4), facecolor='white')
+                    ax.plot(time_axis, rolling_hr, color='#ef4444', linewidth=2.5, label='Heart Rate')
+                    if hr_avg:
+                        ax.axhline(y=hr_avg, color='#dc2626', linestyle='--', linewidth=1.5, alpha=0.7, label=f'Avg: {hr_avg:.0f} bpm')
+                    ax.set_xlabel("Time (seconds)", fontsize=10)
+                    ax.set_ylabel("Heart Rate (bpm)", fontsize=10)
+                    ax.grid(True, alpha=0.2)
+                    ax.spines['top'].set_visible(False)
+                    ax.spines['right'].set_visible(False)
+                    ax.legend(loc='upper right', fontsize=8)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    plt.close(fig)
+                except Exception as e:
+                    st.error(f"Error plotting heart rate: {e}")
         
         with c2:
             if has_rr:
-                rolling_rr = vital_signs['rolling_respiratory_rate']['data']
-                time_axis = np.arange(len(rolling_rr)) / fps
-                rr_avg = vital_signs.get('respiratory_rate', {}).get('value')
-                
-                fig, ax = plt.subplots(figsize=(7, 4), facecolor='white')
-                ax.plot(time_axis, rolling_rr, color='#3b82f6', linewidth=2.5, label='Respiratory Rate')
-                if rr_avg:
-                    ax.axhline(y=rr_avg, color='#2563eb', linestyle='--', linewidth=1.5, alpha=0.7, label=f'Avg: {rr_avg:.0f} rpm')
-                ax.set_xlabel("Time (seconds)", fontsize=10)
-                ax.set_ylabel("Respiratory Rate (rpm)", fontsize=10)
-                ax.grid(True, alpha=0.2)
-                ax.spines['top'].set_visible(False)
-                ax.spines['right'].set_visible(False)
-                ax.legend(loc='upper right', fontsize=8)
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
+                try:
+                    rolling_rr = vital_signs['rolling_respiratory_rate']['data']
+                    time_axis = np.arange(len(rolling_rr)) / fps
+                    rr_avg = vital_signs.get('respiratory_rate', {}).get('value')
+                    
+                    fig, ax = plt.subplots(figsize=(7, 4), facecolor='white')
+                    ax.plot(time_axis, rolling_rr, color='#3b82f6', linewidth=2.5, label='Respiratory Rate')
+                    if rr_avg:
+                        ax.axhline(y=rr_avg, color='#2563eb', linestyle='--', linewidth=1.5, alpha=0.7, label=f'Avg: {rr_avg:.0f} rpm')
+                    ax.set_xlabel("Time (seconds)", fontsize=10)
+                    ax.set_ylabel("Respiratory Rate (rpm)", fontsize=10)
+                    ax.grid(True, alpha=0.2)
+                    ax.spines['top'].set_visible(False)
+                    ax.spines['right'].set_visible(False)
+                    ax.legend(loc='upper right', fontsize=8)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    plt.close(fig)
+                except Exception as e:
+                    st.error(f"Error plotting respiratory rate: {e}")
