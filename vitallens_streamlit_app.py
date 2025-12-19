@@ -11,33 +11,42 @@ st.set_page_config(
 import matplotlib
 matplotlib.use('Agg')
 
-import cv2
-import numpy as np
-import tempfile
-import matplotlib.pyplot as plt
-import os
-import sys
-
-# Initialize session state
-if 'results' not in st.session_state:
-    st.session_state.results = None
-if 'fps' not in st.session_state:
-    st.session_state.fps = None
-if 'error_log' not in st.session_state:
-    st.session_state.error_log = []
-
-# Import VitalLens after Streamlit config
 try:
-    import vitallens
-    VITALLENS_AVAILABLE = True
-    st.session_state.error_log.append("✅ VitalLens imported successfully")
-except ImportError as e:
+    import cv2
+    import numpy as np
+    import tempfile
+    import matplotlib.pyplot as plt
+    import os
+    import sys
+    
+    # Initialize session state
+    if 'results' not in st.session_state:
+        st.session_state.results = None
+    if 'fps' not in st.session_state:
+        st.session_state.fps = None
+    if 'error_log' not in st.session_state:
+        st.session_state.error_log = []
+    
+    # Import VitalLens after Streamlit config
     VITALLENS_AVAILABLE = False
-    error_msg = f"VitalLens import error: {e}"
-    st.session_state.error_log.append(f"❌ {error_msg}")
-    st.error(error_msg)
+    try:
+        import vitallens
+        VITALLENS_AVAILABLE = True
+        st.session_state.error_log.append("✅ VitalLens imported successfully")
+    except ImportError as e:
+        error_msg = f"VitalLens import error: {e}"
+        st.session_state.error_log.append(f"❌ {error_msg}")
+        st.error(error_msg)
+    except Exception as e:
+        error_msg = f"Unexpected error importing VitalLens: {e}"
+        st.session_state.error_log.append(f"❌ {error_msg}")
+        st.error(error_msg)
+
+except Exception as e:
+    st.error(f"Critical error during imports: {e}")
     import traceback
     st.code(traceback.format_exc())
+    st.stop()
 
 # Custom CSS
 st.markdown('''
@@ -159,18 +168,20 @@ with col1:
     
     # Debug info expander
     with st.expander("🔍 Debug Information"):
-        st.write("**System Info:**")
-        st.code(f"Python: {sys.version}")
-        st.code(f"OpenCV: {cv2.__version__}")
-        if VITALLENS_AVAILABLE:
-            try:
-                st.code(f"VitalLens: {vitallens.__version__}")
-            except AttributeError:
-                st.code("VitalLens: version unavailable")
-        
-        st.write("**Error Log:**")
-        for log in st.session_state.error_log:
-            st.text(log)
+        try:
+            st.write("**System Info:**")
+            st.code(f"Python: {sys.version}")
+            st.code(f"OpenCV: {cv2.__version__}")
+            st.code(f"VitalLens Available: {VITALLENS_AVAILABLE}")
+            
+            st.write("**Error Log:**")
+            if st.session_state.error_log:
+                for log in st.session_state.error_log:
+                    st.text(log)
+            else:
+                st.text("No errors logged yet")
+        except Exception as e:
+            st.error(f"Error in debug panel: {e}")
 
 # MIDDLE COLUMN - Video Upload & Analysis
 with col2:
@@ -321,7 +332,7 @@ with col2:
                     st.session_state.error_log.append(f"⚠️ Could not delete temp file: {e}")
     
     elif not VITALLENS_AVAILABLE:
-        st.error("❌ VitalLens library not available. Check the error message above.")
+        st.error("❌ VitalLens library not available. Check the error message in the debug panel.")
     elif not api_key:
         st.warning("⚠️ Please enter your API key")
     elif not video_path:
