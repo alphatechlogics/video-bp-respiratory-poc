@@ -291,7 +291,7 @@ with col1:
     # Scenario selection
     st.markdown('<div class="instructions-container">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Apply Shen in various scenarios</div>', unsafe_allow_html=True)
-    scenario = st.selectbox("", ["Health Assessment", "Fitness Tracking", "Wellness Monitoring"], label_visibility="collapsed")
+    scenario = st.selectbox("Select Scenario", ["Health Assessment", "Fitness Tracking", "Wellness Monitoring"], label_visibility="collapsed")
 
     st.markdown('''
     <div class="scenario-description">
