@@ -163,7 +163,10 @@ with col1:
         st.code(f"Python: {sys.version}")
         st.code(f"OpenCV: {cv2.__version__}")
         if VITALLENS_AVAILABLE:
-            st.code(f"VitalLens: {vitallens.__version__}")
+            try:
+                st.code(f"VitalLens: {vitallens.__version__}")
+            except AttributeError:
+                st.code("VitalLens: version unavailable")
         
         st.write("**Error Log:**")
         for log in st.session_state.error_log:
