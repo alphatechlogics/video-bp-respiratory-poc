@@ -4,6 +4,7 @@ import numpy as np
 import vitallens
 import tempfile
 import matplotlib.pyplot as plt
+import traceback
 
 # Page config
 st.set_page_config(
@@ -283,7 +284,12 @@ with col1:
     # Scenario selection
     st.markdown('<div class="instructions-container">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Apply Shen in various scenarios</div>', unsafe_allow_html=True)
-    scenario = st.selectbox("", ["Health Assessment", "Fitness Tracking", "Wellness Monitoring"], label_visibility="collapsed")
+    scenario = st.selectbox(
+        "Select Scenario",
+        ["Health Assessment", "Fitness Tracking", "Wellness Monitoring"],
+        label_visibility="collapsed",
+        key="scenario_select"
+    )
     
     st.markdown('''
     <div class="scenario-description">
@@ -298,10 +304,16 @@ with col1:
 with col2:
     st.markdown('<div class="video-section">', unsafe_allow_html=True)
     
-    video_file = st.file_uploader("📹 Upload Video", type=["mp4", "avi", "mov"])
+    video_file = st.file_uploader("📹 Upload Video", type=["mp4", "avi", "mov"], key="video_uploader")
     
     # API Key input
-    api_key = st.text_input("🔑 Enter VitalLens API Key:", type="password", placeholder="Your API key here")
+    api_key = st.text_input(
+        "VitalLens API Key",
+        type="password",
+        placeholder="Enter your VitalLens API key",
+        help="Get your API key from VitalLens dashboard",
+        key="api_key_input"
+    )
     
     video_path = None
     if video_file is not None:
@@ -316,48 +328,70 @@ with col2:
     
     # Start button
     if video_path and api_key:
-        if st.button("START", use_container_width=True):
-            with st.spinner("Loading and analyzing video..."):
-                try:
+        if st.button("START ANALYSIS", use_container_width=True, key="start_button"):
+            try:
+                with st.spinner("Loading and analyzing video..."):
                     # Load video
                     cap = cv2.VideoCapture(video_path)
-                    fps = cap.get(cv2.CAP_PROP_FPS) or 30
-                    frames = []
-                    while True:
-                        ret, frame = cap.read()
-                        if not ret:
-                            break
-                        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                    cap.release()
-                    video_array = np.array(frames)
                     
-                    st.success(f"✅ Video loaded: {len(frames)} frames at {fps:.1f} FPS")
-                    
-                    # Initialize VitalLens
-                    vl = vitallens.VitalLens(
-                        method=vitallens.Method.VITALLENS,
-                        api_key=api_key,
-                        mode=vitallens.Mode.BURST,
-                        export_to_json=True,
-                        export_dir=tempfile.gettempdir(),
-                        estimate_rolling_vitals=True
-                    )
-                    
-                    # Analyze
-                    with st.spinner("Analyzing vital signs..."):
-                        results = vl(video_array, fps=fps, export_filename="vitals_analysis")
-                    
-                    if not results:
-                        st.error("⚠️ No face detected in video!")
+                    if not cap.isOpened():
+                        st.error("❌ Could not open video file. Please upload a valid video.")
                     else:
-                        st.session_state['results'] = results[0]['vital_signs']
-                        st.session_state['fps'] = fps
-                        st.rerun()
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        if fps == 0:
+                            fps = 30.0
+                            st.warning("⚠️ Could not detect FPS, using default 30 FPS")
                         
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+                        frames = []
+                        frame_count = 0
+                        max_frames = 1800  # Limit to ~60 seconds at 30fps
+                        
+                        while frame_count < max_frames:
+                            ret, frame = cap.read()
+                            if not ret:
+                                break
+                            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                            frame_count += 1
+                        
+                        cap.release()
+                        
+                        if len(frames) == 0:
+                            st.error("❌ No frames could be read from the video.")
+                        else:
+                            video_array = np.array(frames)
+                            st.success(f"✅ Video loaded: {len(frames)} frames at {fps:.1f} FPS ({len(frames)/fps:.1f} seconds)")
+                            
+                            # Initialize VitalLens
+                            with st.spinner("Initializing VitalLens..."):
+                                vl = vitallens.VitalLens(
+                                    method=vitallens.Method.VITALLENS,
+                                    api_key=api_key,
+                                    mode=vitallens.Mode.BURST,
+                                    export_to_json=False,
+                                    estimate_rolling_vitals=True
+                                )
+                            
+                            # Analyze
+                            with st.spinner("Analyzing vital signs... This may take a moment."):
+                                results = vl(video_array, fps=fps)
+                            
+                            if not results:
+                                st.error("⚠️ No face detected in video! Please ensure:\n- Your face is clearly visible\n- Good lighting conditions\n- Face is centered in frame")
+                            else:
+                                st.session_state['results'] = results[0]['vital_signs']
+                                st.session_state['fps'] = fps
+                                st.success("✅ Analysis complete!")
+                                st.rerun()
+                                
+            except Exception as e:
+                st.error(f"❌ Error during analysis: {str(e)}")
+                with st.expander("Show detailed error"):
+                    st.code(traceback.format_exc())
+                    
     elif video_path and not api_key:
-        st.warning("⚠️ Please enter your VitalLens API key to proceed")
+        st.info("ℹ️ Please enter your VitalLens API key to proceed")
+    elif not video_path and api_key:
+        st.info("ℹ️ Please upload a video to proceed")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -427,53 +461,56 @@ if 'results' in st.session_state:
     has_rolling_hr = 'rolling_heart_rate' in vital_signs
     has_rolling_rr = 'rolling_respiratory_rate' in vital_signs
     
-    st.markdown("---")
-    st.markdown('<div class="section-title" style="text-align: center; margin: 2rem 0;">📈 Detailed Analysis</div>', unsafe_allow_html=True)
-    
-    chart_col1, chart_col2 = st.columns(2, gap="large")
-    
-    with chart_col1:
-        if has_rolling_hr:
-            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.markdown('<div class="chart-title">Heart Rate Over Time</div>', unsafe_allow_html=True)
-            
-            rolling_hr = vital_signs['rolling_heart_rate']['data']
-            time_axis = np.arange(len(rolling_hr)) / fps
-            hr_global = vital_signs.get('heart_rate', {}).get('value')
-            
-            fig, ax = plt.subplots(figsize=(7, 4), facecolor='white')
-            ax.plot(time_axis, rolling_hr, color='#ef4444', linewidth=2.5)
-            if hr_global:
-                ax.axhline(y=hr_global, color='#dc2626', linestyle='--', linewidth=1.5, alpha=0.7)
-            ax.set_xlabel("Time (seconds)", fontsize=10)
-            ax.set_ylabel("Heart Rate (bpm)", fontsize=10)
-            ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    with chart_col2:
-        if has_rolling_rr:
-            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.markdown('<div class="chart-title">Respiratory Rate Over Time</div>', unsafe_allow_html=True)
-            
-            rolling_rr = vital_signs['rolling_respiratory_rate']['data']
-            time_axis = np.arange(len(rolling_rr)) / fps
-            rr_global = vital_signs.get('respiratory_rate', {}).get('value')
-            
-            fig, ax = plt.subplots(figsize=(7, 4), facecolor='white')
-            ax.plot(time_axis, rolling_rr, color='#3b82f6', linewidth=2.5)
-            if rr_global:
-                ax.axhline(y=rr_global, color='#2563eb', linestyle='--', linewidth=1.5, alpha=0.7)
-            ax.set_xlabel("Time (seconds)", fontsize=10)
-            ax.set_ylabel("Respiratory Rate (rpm)", fontsize=10)
-            ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
-            st.markdown('</div>', unsafe_allow_html=True)
+    if has_rolling_hr or has_rolling_rr:
+        st.markdown("---")
+        st.markdown('<div class="section-title" style="text-align: center; margin: 2rem 0;">📈 Detailed Analysis</div>', unsafe_allow_html=True)
+        
+        chart_col1, chart_col2 = st.columns(2, gap="large")
+        
+        with chart_col1:
+            if has_rolling_hr:
+                st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                st.markdown('<div class="chart-title">Heart Rate Over Time</div>', unsafe_allow_html=True)
+                
+                rolling_hr = vital_signs['rolling_heart_rate']['data']
+                time_axis = np.arange(len(rolling_hr)) / fps
+                hr_global = vital_signs.get('heart_rate', {}).get('value')
+                
+                fig, ax = plt.subplots(figsize=(7, 4), facecolor='white')
+                ax.plot(time_axis, rolling_hr, color='#ef4444', linewidth=2.5, label='Heart Rate')
+                if hr_global:
+                    ax.axhline(y=hr_global, color='#dc2626', linestyle='--', linewidth=1.5, alpha=0.7, label=f'Average: {hr_global:.0f} bpm')
+                ax.set_xlabel("Time (seconds)", fontsize=10)
+                ax.set_ylabel("Heart Rate (bpm)", fontsize=10)
+                ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.legend(loc='upper right', fontsize=8)
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close()
+                st.markdown('</div>', unsafe_allow_html=True)
+        
+        with chart_col2:
+            if has_rolling_rr:
+                st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                st.markdown('<div class="chart-title">Respiratory Rate Over Time</div>', unsafe_allow_html=True)
+                
+                rolling_rr = vital_signs['rolling_respiratory_rate']['data']
+                time_axis = np.arange(len(rolling_rr)) / fps
+                rr_global = vital_signs.get('respiratory_rate', {}).get('value')
+                
+                fig, ax = plt.subplots(figsize=(7, 4), facecolor='white')
+                ax.plot(time_axis, rolling_rr, color='#3b82f6', linewidth=2.5, label='Respiratory Rate')
+                if rr_global:
+                    ax.axhline(y=rr_global, color='#2563eb', linestyle='--', linewidth=1.5, alpha=0.7, label=f'Average: {rr_global:.0f} rpm')
+                ax.set_xlabel("Time (seconds)", fontsize=10)
+                ax.set_ylabel("Respiratory Rate (rpm)", fontsize=10)
+                ax.grid(True, alpha=0.2, linestyle='-', linewidth=0.5)
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.legend(loc='upper right', fontsize=8)
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close()
+                st.markdown('</div>', unsafe_allow_html=True)
