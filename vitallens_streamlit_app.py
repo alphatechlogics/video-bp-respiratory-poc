@@ -1,8 +1,4 @@
 import streamlit as st
-import cv2
-import numpy as np
-import tempfile
-import matplotlib.pyplot as plt
 
 # Must be first Streamlit command
 st.set_page_config(
@@ -10,6 +6,16 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+
+# Set matplotlib backend before importing pyplot
+import matplotlib
+matplotlib.use('Agg')
+
+import cv2
+import numpy as np
+import tempfile
+import matplotlib.pyplot as plt
+import os
 
 # Initialize session state
 if 'results' not in st.session_state:
@@ -24,6 +30,8 @@ try:
 except ImportError as e:
     VITALLENS_AVAILABLE = False
     st.error(f"VitalLens import error: {e}")
+    import traceback
+    st.code(traceback.format_exc())
 
 # Custom CSS
 st.markdown('''
@@ -166,10 +174,14 @@ with col2:
     if video_file:
         st.video(video_file)
         
-        # Save to temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
-            tmp_file.write(video_file.read())
-            video_path = tmp_file.name
+        # Save to temp file with proper cleanup
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
+                tmp_file.write(video_file.read())
+                video_path = tmp_file.name
+        except Exception as e:
+            st.error(f"Error saving video: {str(e)}")
+            video_path = None
     else:
         video_path = None
         st.info("📹 Please upload a video file to begin")
@@ -185,10 +197,15 @@ with col2:
                         st.error("Cannot open video file")
                         st.stop()
                     
-                    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-                    frames = []
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    if not fps or fps <= 0:
+                        fps = 30.0
+                        st.warning(f"Could not detect FPS, using default: {fps}")
                     
-                    while len(frames) < 1800:  # Max 60 seconds
+                    frames = []
+                    max_frames = 1800  # Max 60 seconds at 30fps
+                    
+                    while len(frames) < max_frames:
                         ret, frame = cap.read()
                         if not ret:
                             break
@@ -226,14 +243,23 @@ with col2:
                     st.rerun()
                     
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"Error during analysis: {str(e)}")
                 import traceback
                 st.code(traceback.format_exc())
+            finally:
+                # Clean up temp file
+                try:
+                    if video_path and os.path.exists(video_path):
+                        os.unlink(video_path)
+                except:
+                    pass
     
     elif not VITALLENS_AVAILABLE:
-        st.error("VitalLens library not available")
+        st.error("VitalLens library not available. Check the error message above.")
     elif not api_key:
         st.warning("Please enter your API key")
+    elif not video_path:
+        st.info("Please upload a video file")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -302,7 +328,7 @@ if st.session_state.results:
                 ax.legend(loc='upper right', fontsize=8)
                 plt.tight_layout()
                 st.pyplot(fig)
-                plt.close()
+                plt.close(fig)
         
         with c2:
             if has_rr:
@@ -322,4 +348,4 @@ if st.session_state.results:
                 ax.legend(loc='upper right', fontsize=8)
                 plt.tight_layout()
                 st.pyplot(fig)
-                plt.close()
+                plt.close(fig)
