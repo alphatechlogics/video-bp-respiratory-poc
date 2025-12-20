@@ -254,13 +254,6 @@ st.markdown('''
 </style>
 ''', unsafe_allow_html=True)
 
-# Get API key from secrets
-try:
-    API_KEY = st.secrets["VITALLENS_API_KEY"]
-except:
-    st.error("⚠️ VitalLens API key not found. Please add it to Streamlit secrets.")
-    st.stop()
-
 # Header
 st.markdown('''
 <div class="header-section">
@@ -291,7 +284,7 @@ with col1:
     # Scenario selection
     st.markdown('<div class="instructions-container">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Apply Shen in various scenarios</div>', unsafe_allow_html=True)
-    scenario = st.selectbox("Select Scenario", ["Health Assessment", "Fitness Tracking", "Wellness Monitoring"], label_visibility="collapsed")
+    scenario = st.selectbox("", ["Health Assessment", "Fitness Tracking", "Wellness Monitoring"], label_visibility="collapsed")
 
     st.markdown('''
     <div class="scenario-description">
@@ -310,9 +303,11 @@ with col2:
 
     video_path = None
     if video_file is not None:
+        # Save uploaded file to temporary location
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(video_file.read())
         video_path = tfile.name
+        tfile.close()
 
     if video_path:
         st.video(video_path)
@@ -328,17 +323,21 @@ with col2:
                     cap = cv2.VideoCapture(video_path)
                     fps = cap.get(cv2.CAP_PROP_FPS) or 30
                     frames = []
+                    
                     while True:
                         ret, frame = cap.read()
                         if not ret:
                             break
                         frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    
                     cap.release()
                     video_array = np.array(frames)
 
                     st.success(f"✅ Video loaded: {len(frames)} frames at {fps:.1f} FPS")
 
-                    # Initialize VitalLens
+                    # Initialize VitalLens with API key from secrets
+                    API_KEY = st.secrets.get("VITALLENS_API_KEY", "GdsxHv55ys3pWHUEc8tZm5Sr6H5oeb7n30NouKyX")
+                    
                     vl = vitallens.VitalLens(
                         method=vitallens.Method.VITALLENS,
                         api_key=API_KEY,
@@ -361,6 +360,14 @@ with col2:
                 
                 except Exception as e:
                     st.error(f"❌ Error processing video: {str(e)}")
+                
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(video_path):
+                        try:
+                            os.unlink(video_path)
+                        except:
+                            pass
 
     st.markdown('</div>', unsafe_allow_html=True)
 
