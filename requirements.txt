@@ -1,9 +1,18 @@
-streamlit==1.52.2
-opencv-python-headless==4.12.0.88
+# Core dependencies first
 numpy==2.0.2
-vitallens==0.4.6
-matplotlib==3.10.0
-av==16.0.1
 pillow==11.3.0
-scipy==1.16.3
-pandas==2.2.2
+
+# Then image processing
+opencv-python-headless==4.12.0.88
+
+# Then visualization
+matplotlib==3.10.0
+
+# Then media
+av==16.0.1
+
+# Then streamlit
+streamlit==1.52.2
+
+# Finally vitallens
+vitallens==0.4.6
